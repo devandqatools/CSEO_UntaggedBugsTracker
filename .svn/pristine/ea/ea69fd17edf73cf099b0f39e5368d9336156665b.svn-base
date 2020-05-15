@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<configuration>
+    <startup> 
+        <supportedRuntime version="v4.0" sku=".NETFramework,Version=v4.5.2" />
+    </startup>
+  <appSettings>
+    <add key="OutPutFileFolder" value="\\st\scratch\users\v-garr\MSIT-Tool\ReportOutput"></add>
+    <add key="COMPARISONMODE" value="YES"></add><!--Set YES: if comparison with OLD data is neede, else set NO-->
+    <add key="COMPARISONREPORT" value="\\st\scratch\users\v-garr\MSIT-Tool\ReportOutput\Report-SMSGMyApps_12082016_145845.xlsx"></add><!--Keep blank if comparison needed with blank report-->
+    <add key="ReportTitle" value="Scorecard Comparison Report"></add>
+    <add key="SendMailTo" value="v-ansara@microsoft.com"></add>
+    <add key="SendMailCC" value="v-aamisr@microsoft.com;v-chvak@microsoft.com"></add>
+    <add key="LogFile" value="E:\SMSG_Scorecard\ScorecardSMSGLogs"></add>
+  </appSettings>
+
+</configuration>

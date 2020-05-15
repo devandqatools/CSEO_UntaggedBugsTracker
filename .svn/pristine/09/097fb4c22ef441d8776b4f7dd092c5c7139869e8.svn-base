@@ -1,0 +1,1874 @@
+﻿using Microsoft.Office.Interop.Excel;
+using System;
+using System.Collections.Generic;
+using System.Configuration;
+using System.Data;
+using System.Data.OleDb;
+using System.Data.SqlClient;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+
+namespace ScorecardComparison_Report
+{
+    class Program
+    {
+        public static double xCount = 0;
+        static bool executefurther = true;
+        static DataSet oldds = new DataSet("Results");
+        static string shareFilepath1 = string.Empty;
+        static string shareFilepath2 = string.Empty;
+        static void Main(string[] args)
+        {
+            RunScheduler();
+            DataSet ds = new DataSet("Results");
+            if (ConfigurationManager.AppSettings["COMPARISONMODE"] == "YES")
+            {
+                string latestfileName = null;
+                if (String.IsNullOrEmpty(ConfigurationManager.AppSettings["COMPARISONREPORT"].Trim()))//no name specified - pick latest file
+                {
+                    DateTime latestFiletime = new DateTime();
+                    bool first = true;
+                    //Get the latest file from file folder
+                    if (Directory.Exists(ConfigurationManager.AppSettings["OutPutFileFolder"]))
+                    {
+                        DirectoryInfo dr = new DirectoryInfo(ConfigurationManager.AppSettings["OutPutFileFolder"]);
+                        foreach (FileInfo f in dr.GetFiles())
+                        {
+                            if (f.Name.Contains("Report-SMSGMyApps"))
+                            {
+                                if (first)
+                                {
+                                    latestfileName = f.FullName;
+                                    latestFiletime = f.LastWriteTimeUtc;
+                                    first = false;
+                                }
+                                else
+                                {
+                                    if (f.LastWriteTimeUtc > latestFiletime)
+                                    {
+                                        latestfileName = f.FullName;
+                                        latestFiletime = f.LastWriteTimeUtc;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("Configuration file - Missing entry for report folder.");
+                    }
+                }
+                else
+                {
+                    latestfileName = ConfigurationManager.AppSettings["COMPARISONREPORT"];
+                }
+                //CheckReportPathExistance for baseline Report
+                if (File.Exists(latestfileName.ToString()))
+                {
+                    oldds = ExportExceltoDT(latestfileName);
+                }
+                else
+                {
+                    Console.WriteLine("Specified report file- " + latestfileName + " does not exist. Please update the config file and re-run the tool.\n\nPress any key to exit.");
+                    Console.ReadLine();
+
+                    executefurther = false;
+                }
+            }
+            if (ConfigurationManager.AppSettings["COMPARISONMODE"] == "NO" || executefurther == true)
+            {
+                //Read data from DB into datasets
+                //Comparison logic for the datasets
+                //Generate the results for comparison
+                //Write the results to Excel file/PowerBI Dataset
+                //DataSet ds = new DataSet("Results");
+                DataSet dsSummary = new DataSet("Summary");
+                DataSet dsFinal = new DataSet("Final");
+                System.Data.DataTable FinalDT = new System.Data.DataTable();
+                FinalDT.Columns.Add("Div");
+                FinalDT.Columns.Add("Grp");
+                FinalDT.Columns.Add("SubGrp");
+                FinalDT.Columns.Add("EngGrp");
+                FinalDT.Columns.Add("EngSubGrp");
+                FinalDT.Columns.Add("EngTeam");
+                FinalDT.Columns.Add("GrpAppID");
+                FinalDT.Columns.Add("ICTO");
+                FinalDT.Columns.Add("SrvOffering");
+                FinalDT.Columns.Add("NameDesc");
+                FinalDT.Columns.Add("URL");
+                FinalDT.Columns.Add("OpStatus");
+                FinalDT.Columns.Add("DecomDate");
+                FinalDT.Columns.Add("ExceptionType");
+                FinalDT.Columns.Add("ExceptionDetail");
+                FinalDT.Columns.Add("ExceptionEndDate");
+                FinalDT.Columns.Add("GradeDependency");
+                FinalDT.Columns.Add("Type");
+                FinalDT.Columns.Add("Category");
+                FinalDT.Columns.Add("Pri");
+                FinalDT.Columns.Add("Grade");
+                FinalDT.Columns.Add("Goal1");
+                FinalDT.Columns.Add("Goal2");
+                FinalDT.Columns.Add("AccCont");
+                FinalDT.Columns.Add("AccChamp");
+                FinalDT.Columns.Add("Owner");
+                FinalDT.Columns.Add("EngOwner");
+                FinalDT.Columns.Add("SubGrpAccLead");
+                FinalDT.Columns.Add("TrackStarted");
+                FinalDT.Columns.Add("TrackAssess");
+                FinalDT.Columns.Add("TrackPlan");
+                FinalDT.Columns.Add("TrackBuild");
+                FinalDT.Columns.Add("TrackValidated");
+                FinalDT.Columns.Add("UsabilityStudy");
+                FinalDT.Columns.Add("StatusTweet");
+                FinalDT.Columns.Add("Notes");
+                DataRow fdr = FinalDT.NewRow();
+                fdr["Div"] = "Division (Required)";
+                fdr["Grp"] = "Group (Required)";
+                fdr["SubGrp"] = "Sub Group (Required)";
+                fdr["EngGrp"] = "Engineering Group";
+                fdr["EngSubGrp"] = "Eng. Sub Group";
+                fdr["EngTeam"] = "Eng, Team";
+                fdr["GrpAppID"] = "Application ID";
+                fdr["ICTO"] = "ICTO #";
+                fdr["SrvOffering"] = "Service Offering";
+                fdr["NameDesc"] = "Name";
+                fdr["URL"] = "URL";
+                fdr["OpStatus"] = "Ops Status (Required)";
+                fdr["DecomDate"] = "Decomm. Date";
+                fdr["ExceptionType"] = "Exception Type (Required)";
+                fdr["ExceptionDetail"] = "Exception Detail";
+                fdr["ExceptionEndDate"] = "Exception End Date";
+                fdr["GradeDependency"] = "Dependency (Required)";
+                fdr["Type"] = "Type";
+                fdr["Category"] = "Category";
+                fdr["Pri"] = "Priority";
+                fdr["Grade"] = "Grade";
+                fdr["Goal1"] = "CY16 Goal";
+                fdr["Goal2"] = "FY17 Goal";
+                fdr["AccCont"] = "Accessibiltiy Lead";
+                fdr["AccChamp"] = "Exec Sponsor";
+                fdr["Owner"] = "Business Owner";
+                fdr["EngOwner"] = "Eng. Owner";
+                fdr["SubGrpAccLead"] = "Subgrp Lead";
+                fdr["TrackStarted"] = "Track Started";
+                fdr["TrackAssess"] = "Track Assess";
+                fdr["TrackPlan"] = "Track Plan";
+                fdr["TrackBuild"] = "Track Build";
+                fdr["TrackValidated"] = "Track Validated";
+                fdr["UsabilityStudy"] = "Usability Study";
+                fdr["StatusTweet"] = "Status Tweet";
+                fdr["Notes"] = "Notes";
+                FinalDT.Rows.Add(fdr);
+                FinalDT.TableName = "MyApps-NotFoundinSMSG";
+                //Get Data from SMSG Scorecard DB.
+                System.Data.DataTable dtSMSGDBRaw = GetDataFromDB("SMSGDB");
+                System.Data.DataTable dtSMSGDBFiltered = dtSMSGDBRaw.AsEnumerable().Where(r => r.Field<string>("Grp") == "Microsoft IT").CopyToDataTable();
+                dtSMSGDBFiltered.TableName = "SMSGDB-Filtered";
+                dtSMSGDBFiltered.Columns.Add("MyApps Name");
+                dtSMSGDBFiltered.Columns.Add("MyApps BPUName");
+                dtSMSGDBFiltered.Columns.Add("MyApps ApplicationOwner");
+                dtSMSGDBFiltered.Columns.Add("MyApps AppStatus");
+                dtSMSGDBFiltered.Columns.Add("MyApps URL");
+                dtSMSGDBFiltered.Columns.Add("MyApps ServiceOffering");
+                dtSMSGDBFiltered.Columns.Add("MyApps ServiceLine");
+                dtSMSGDBFiltered.Columns.Add("MyApps SourceSystem");
+                dtSMSGDBFiltered.Columns.Add("MyApps MSAccessibilityStandards");
+                dtSMSGDBFiltered.Columns.Add("MyApps Service");
+
+                Console.WriteLine("Data fetched for SMSGDB");
+                //Get Data from MyAppsDB
+                System.Data.DataTable dtMyAppsDBRaw = GetDataFromDB("MyAppsDB");
+                System.Data.DataTable dtMyAppsDBFiltered = dtMyAppsDBRaw.AsEnumerable().Where(r => r.Field<string>("MSAccessibilityStandards") == "Yes").CopyToDataTable();
+                dtMyAppsDBFiltered = dtMyAppsDBFiltered.AsEnumerable().Where(r => r.Field<string>("AppStatus") == "Active").CopyToDataTable();
+                dtMyAppsDBFiltered = dtMyAppsDBFiltered.AsEnumerable().Where(r => r.Field<string>("SourceSystem") != "Nokia-ICM").CopyToDataTable();
+                dtMyAppsDBFiltered = dtMyAppsDBFiltered.AsEnumerable().Where(r => r.Field<string>("BPUName") != "Non-Microsoft IT").CopyToDataTable();
+                dtMyAppsDBFiltered = dtMyAppsDBFiltered.AsEnumerable().Where(r => r.Field<string>("BPUName") != "ECO").CopyToDataTable();
+                dtMyAppsDBFiltered = dtMyAppsDBFiltered.AsEnumerable().Where(r => r.Field<string>("BPUName") != "Enterprise Commerce IT").CopyToDataTable();
+                dtMyAppsDBFiltered = dtMyAppsDBFiltered.AsEnumerable().Where(r => r.Field<string>("BPUName") != "Retail Stores IT").CopyToDataTable();
+                dtMyAppsDBFiltered.TableName = "MyApps-Filtered";
+
+                System.Data.DataTable dtMyAppsDBNonActive = dtMyAppsDBRaw.AsEnumerable().Where(r => r.Field<string>("MSAccessibilityStandards") == "Yes").CopyToDataTable();
+                dtMyAppsDBNonActive = dtMyAppsDBNonActive.AsEnumerable().Where(r => r.Field<string>("AppStatus") != "Active").CopyToDataTable();
+                dtMyAppsDBNonActive = dtMyAppsDBNonActive.AsEnumerable().Where(r => r.Field<string>("SourceSystem") != "Nokia-ICM").CopyToDataTable();
+                dtMyAppsDBNonActive = dtMyAppsDBNonActive.AsEnumerable().Where(r => r.Field<string>("BPUName") != "Non-Microsoft IT").CopyToDataTable();
+                dtMyAppsDBNonActive = dtMyAppsDBNonActive.AsEnumerable().Where(r => r.Field<string>("BPUName") != "ECO").CopyToDataTable();
+                dtMyAppsDBNonActive = dtMyAppsDBNonActive.AsEnumerable().Where(r => r.Field<string>("BPUName") != "Enterprise Commerce IT").CopyToDataTable();
+                dtMyAppsDBNonActive = dtMyAppsDBNonActive.AsEnumerable().Where(r => r.Field<string>("BPUName") != "Retail Stores IT").CopyToDataTable();
+                dtMyAppsDBNonActive.TableName = "MyApps-NonActive";
+
+                //Create a new table 
+                Console.WriteLine("Data fetched for MyAppsDB");
+
+                dtMyAppsDBFiltered.Columns.Add("SMSG Priority");
+                dtMyAppsDBFiltered.Columns.Add("SMSG Grade");
+                dtMyAppsDBFiltered.Columns.Add("SMSG URL");
+                CompareDB(ref dtMyAppsDBFiltered, ref dtSMSGDBFiltered, dtMyAppsDBRaw, dtSMSGDBRaw);
+                System.Data.DataTable dtSMSGNotFound = dtSMSGDBFiltered.AsEnumerable().Where(r => r.Field<string>("MyApps Name") == "Not Found").CopyToDataTable();
+                dtSMSGNotFound.TableName = "SMSG-NotFoundinMyApps";
+
+                //Add sheets
+                ds.Tables.Add(dtSMSGNotFound);
+                ds.Tables.Add(dtSMSGDBFiltered);
+                ds.Tables.Add(dtSMSGDBRaw);
+                if (dtMyAppsDBFiltered.AsEnumerable().Where(r => r.Field<string>("SMSG Priority") == "Not Found in SMSG").Count() > 0)
+                {
+                    System.Data.DataTable selectedTable4 = dtMyAppsDBFiltered.AsEnumerable().Where(r => r.Field<string>("SMSG Priority") == "Not Found in SMSG").CopyToDataTable();
+                    selectedTable4.TableName = "MyApps-NotFoundSMSG";
+                    ds.Tables.Add(selectedTable4);
+                    foreach (DataRow drx in selectedTable4.Rows)
+                    {
+                        DataRow dr = FinalDT.NewRow();
+                        dr["Div"] = "SMSG";
+                        dr["Grp"] = "MSIT";
+                        dr["SubGrp"] = drx["BPUName"].ToString(); ;
+                        dr["GrpAppID"] = drx["ApplicationID"].ToString();
+                        dr["ICTO"] = drx["SoftwareAssetSearchableID"].ToString();
+                        dr["SrvOffering"] = drx["ServiceOffering"].ToString();
+                        dr["NameDesc"] = drx["Name"].ToString();
+                        dr["URL"] = drx["URL"].ToString(); ;
+                        dr["OpStatus"] = "Live";
+                        dr["ExceptionType"] = "None";
+                        dr["GradeDependency"] = "No Dependencies";
+                        dr["Type"] = "Internal";
+                        dr["Category"] = "Website";
+                        dr["Pri"] = "3";
+                        dr["AccCont"] = "Bev Carey";
+                        dr["AccChamp"] = "Matt Kellerhals";
+                        dr["TrackStarted"] = "False";
+                        dr["TrackAssess"] = "False";
+                        dr["TrackPlan"] = "False";
+                        dr["TrackBuild"] = "False";
+                        dr["TrackValidated"] = "False";
+                        dr["UsabilityStudy"] = "False";
+                        dr["StatusTweet"] = "";
+                        dr["Notes"] = "";
+                        FinalDT.Rows.Add(dr);
+                    }
+                }
+
+
+
+                if (dtMyAppsDBFiltered.AsEnumerable().Where(r => r.Field<string>("SMSG Priority") == "Not Prioritized in SMSG").Count() > 0)
+                {
+                    System.Data.DataTable dtMyAppsNot = ds.Tables["MyApps-Filtered"].AsEnumerable().Where(r => r.Field<string>("SMSG Priority") == "Not Prioritized in SMSG").CopyToDataTable();
+                    dtMyAppsNot.TableName = "MyApps-NotPrioritizedSMSG";
+
+                }
+                ds.Tables.Add(dtMyAppsDBNonActive);
+                ds.Tables.Add(dtMyAppsDBFiltered);
+                ds.Tables.Add(dtMyAppsDBRaw);
+                dsSummary.Tables.Add(GetBPUSummary(ds));
+                dsSummary.Tables.Add(GetBPUWithoutPriority(ds));
+                dsSummary.Tables.Add(GetSMSGGroupSummary(ds));
+                dsSummary.Tables.Add(GetSMSGGroupDetails(ds));
+                //Summary of SMSG
+                dsSummary.Tables.Add(GetSummarySMSG(ds));
+                //Summary of MyApps
+                dsSummary.Tables.Add(GetSummaryMyApps(ds));
+                //for (int i = 0; i < oldds.Tables.Count; i++)
+                //{
+                //    ds.Tables.Add(oldds.Tables[i]);
+                //}
+                if (ConfigurationManager.AppSettings["COMPARISONMODE"] == "YES")
+                {
+                    //Write the results to an Excel file
+                    GetDifferences(ref ds, oldds);
+                }
+                Console.WriteLine("Writing results to excel report...");
+                WriteDataTableToExcel(ds, oldds, dsSummary, ConfigurationManager.AppSettings["OutPutFileFolder"], "Report-SMSGMyApps");
+                dsFinal.Tables.Add(FinalDT);
+                WriteDataTableToExcel(dsFinal, dsFinal, dsFinal, ConfigurationManager.AppSettings["OutPutFileFolder"], "BulkUpdate");
+                SendMail(dsSummary);
+            }
+        }
+
+        private static void GetDifferences(ref DataSet ds, DataSet oldds)
+        {
+            //New entries in My Apps
+            var idsNotInB = ds.Tables["MyApps-Filtered"].AsEnumerable().Select(r => r.Field<string>("ApplicationID"))
+        .Except(oldds.Tables["MyApps Filtered_OLD"].AsEnumerable().Select(r => r.Field<string>("ApplicationID")));
+            if (idsNotInB.Count() > 0)
+            {
+                System.Data.DataTable TableC = (from row in ds.Tables["MyApps-Filtered"].AsEnumerable()
+                                                join id in idsNotInB
+                                                on row.Field<string>("ApplicationID") equals id
+                                                select row).CopyToDataTable();
+                TableC.TableName = "MyApps Filtered-NewEntries";
+                ds.Tables.Add(TableC);
+            }
+            else
+            {
+                System.Data.DataTable TableC = new System.Data.DataTable();
+                TableC.TableName = "MyApps Filtered-NewEntries";
+                TableC.Columns.Add("No entries found.");
+                ds.Tables.Add(TableC);
+            }
+            //New entries in SMSG
+            idsNotInB = ds.Tables["SMSGDB-Filtered"].AsEnumerable().Select(r => r.Field<string>("GrpAppID"))
+        .Except(oldds.Tables["SMSG MSIT Apps_OLD"].AsEnumerable().Select(r => r.Field<string>("GrpAppID")));
+            if (idsNotInB.Count() > 0)
+            {
+                System.Data.DataTable TableC = (from row in ds.Tables["SMSGDB-Filtered"].AsEnumerable()
+                                                join id in idsNotInB
+                                                on row.Field<string>("GrpAppID") equals id
+                                                select row).CopyToDataTable();
+                TableC.TableName = "SMSG MSIT Apps-NewEntries";
+                ds.Tables.Add(TableC);
+            }
+            else
+            {
+                System.Data.DataTable TableC = new System.Data.DataTable();
+                TableC.TableName = "SMSG MSIT Apps-NewEntries";
+                TableC.Columns.Add("No entries found.");
+                ds.Tables.Add(TableC);
+            }
+            //Deleted entries in SMSG
+            idsNotInB = oldds.Tables["SMSG MSIT Apps_OLD"].AsEnumerable().Select(r => r.Field<string>("GrpAppID"))
+        .Except(ds.Tables["SMSGDB-Filtered"].AsEnumerable().Select(r => r.Field<string>("GrpAppID")));
+            if (idsNotInB.Count() > 0)
+            {
+                System.Data.DataTable TableC = (from row in oldds.Tables["SMSG MSIT Apps_OLD"].AsEnumerable()
+                                                join id in idsNotInB
+                                                on row.Field<string>("GrpAppID") equals id
+                                                select row).CopyToDataTable();
+                TableC.TableName = "SMSG MSIT Apps-DeletedEntries";
+                ds.Tables.Add(TableC);
+            }
+            else
+            {
+                System.Data.DataTable TableC = new System.Data.DataTable();
+                TableC.TableName = "SMSG MSIT Apps-DeletedEntries";
+                TableC.Columns.Add("No entries found.");
+                ds.Tables.Add(TableC);
+            }
+            //Blank and 0 entries in SMSG
+            System.Data.DataTable temp = new System.Data.DataTable();
+            temp.TableName = "SMSGMSITApps-Blankand0";
+            if (ds.Tables["SMSGDB-Filtered"].AsEnumerable().Where(r => (r.Field<string>("GrpAppID") == null || r.Field<string>("GrpAppID") == "0")).Count() > 0)
+            {
+                temp = ds.Tables["SMSGDB-Filtered"].AsEnumerable().Where(r => (r.Field<string>("GrpAppID") == null || r.Field<string>("GrpAppID") == "0")).CopyToDataTable();
+            }
+            else
+            {
+                temp.Columns.Add("No entries found.");
+            }
+            ds.Tables.Add(temp);
+
+            /*
+             * This cron is used to identified the changed TrackValReadyDt field compare to old
+             * excle SMGS report. i.e if comparison with OLD data is needed we automatically 
+             * compare that old excle file and Live DB. Those change are shown in Diffrent 
+             * Tab 'SMSG TrackValReadyDt Filter' and at the last columns we shown new 
+             * columns which one is new and which one is old 'RowDifference'
+             */
+            //Start TrackValReadyDt Field Date Differences
+            System.Data.DataTable tempReadyDt = new System.Data.DataTable();
+            tempReadyDt.Columns.Add("RowDifference");
+            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+            {
+                tempReadyDt.Columns.Add(item.ColumnName);
+            }
+            tempReadyDt.TableName = "SMSG TrackValReadyDt Filter";
+            foreach (System.Data.DataRow dd in ds.Tables["SMSGDB-Filtered"].Rows)
+            {
+                foreach (System.Data.DataRow oldData in oldds.Tables["SMSG MSIT Apps_OLD"].Rows)
+                {
+                    string oldRedId = GetColumnValue<string>(oldData, "RecID");
+                    decimal newRedId = GetColumnValue<decimal>(dd, "RecID");
+                    string oldGrpId = GetColumnValue<string>(oldData, "GrpAppID");
+                    string newGrpId = GetColumnValue<string>(dd, "GrpAppID");
+                    int redyOldId = Convert.ToInt32(oldRedId);
+                    int redyNewId = Convert.ToInt32(newRedId);
+                    if ((newGrpId == oldGrpId) && (redyNewId == redyOldId) && !string.IsNullOrEmpty(newGrpId))
+                    {
+                        string oldTrackReadyDt = GetColumnValue<string>(oldData, "TrackValReadyDt");
+                        string newTrackReadyDt = GetColumnValue<string>(dd, "TrackValReadyDt");
+                        if (oldTrackReadyDt != newTrackReadyDt)
+                        {
+                            //Add the new entry
+                            DataRow dateflt = tempReadyDt.NewRow();
+                            dateflt["RowDifference"] = "New";
+                            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+                            {
+                                dateflt[item.ColumnName] = dd[item.ColumnName].ToString();
+                            }
+                            //dateflt["RowDifference"] = "New";
+                            tempReadyDt.Rows.Add(dateflt);
+                            dateflt = tempReadyDt.NewRow();
+                            dateflt["RowDifference"] = "Old";
+                            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+                            {
+                                dateflt[item.ColumnName] = oldData[item.ColumnName].ToString();
+                            }
+                            //dateflt["RowDifference"] = "Old";
+                            tempReadyDt.Rows.Add(dateflt);
+                            break;
+                        }
+                    }
+                }
+            }
+            ds.Tables.Add(tempReadyDt);
+            //End TrackValReadyDt Field Date Differences
+
+            /*
+            * This cron is used to identified the changed TrackValCompDt field compare to old
+            * excle SMGS report. i.e if comparison with OLD data is needed we automatically 
+            * compare that old excle file and Live DB. Those change are shown in Diffrent 
+            * Tab 'SMSG App CTrackValCompDt Filter' and at the last columns we shown new 
+            * columns which one is new and which one is old 'RowDifference'
+            */
+            //Start TrackValCompDt Field Date Differences
+            System.Data.DataTable tempCompDt = new System.Data.DataTable();
+            tempCompDt.Columns.Add("RowDifference");
+            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+            {
+                tempCompDt.Columns.Add(item.ColumnName);
+            }
+            tempCompDt.TableName = "SMSG App CTrackValCompDt Filter";
+            foreach (System.Data.DataRow dd in ds.Tables["SMSGDB-Filtered"].Rows)
+            {
+                foreach (System.Data.DataRow oldData in oldds.Tables["SMSG MSIT Apps_OLD"].Rows)
+                {
+                    string oldRedId = GetColumnValue<string>(oldData, "RecID");
+                    decimal newRedId = GetColumnValue<decimal>(dd, "RecID");
+                    string oldGrpId = GetColumnValue<string>(oldData, "GrpAppID");
+                    string newGrpId = GetColumnValue<string>(dd, "GrpAppID");
+                    int redyOldId = Convert.ToInt32(oldRedId);
+                    int redyNewId = Convert.ToInt32(newRedId);
+
+                    if ((newGrpId == oldGrpId) && (redyNewId == redyOldId) && !string.IsNullOrEmpty(newGrpId))
+                    {
+                        string oldTrackValCompDt = GetColumnValue<string>(oldData, "TrackValCompDt");
+                        string newTrackValCompDt = GetColumnValue<string>(dd, "TrackValCompDt");
+                        if (oldTrackValCompDt != newTrackValCompDt)
+                        {
+                            //Add the new entry
+                            DataRow datecompflt = tempCompDt.NewRow();
+                            datecompflt["RowDifference"] = "New";
+                            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+                            {
+                                datecompflt[item.ColumnName] = dd[item.ColumnName].ToString();
+                            }
+                            //datecompflt["RowDifference"] = "New";
+                            tempCompDt.Rows.Add(datecompflt);
+                            //Add the old entry
+                            datecompflt = tempCompDt.NewRow();
+                            datecompflt["RowDifference"] = "Old";
+                            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+                            {
+                                datecompflt[item.ColumnName] = oldData[item.ColumnName].ToString();
+                            }
+                            //datecompflt["RowDifference"] = "Old";
+                            tempCompDt.Rows.Add(datecompflt);
+                            break;
+                        }
+                    }
+                }
+            }
+            ds.Tables.Add(tempCompDt);
+            //End TrackValCompDt Field Date Difference
+
+            /*
+             * This cron is used to identified the changed Pri field, compare to old
+             * excle SMGS report and Live DB. i.e if comparison with last day report 
+             * is needed we automatically compare with Live DB. Those change are shown in Diffrent 
+             * Tab 'SMSG App priority Filter' and at the last of the same tab we added new 
+             * columns which one is new and which one is old 'RowEntryDifference'  
+             */
+            //Start Priority Field Compareing
+            System.Data.DataTable tempCompareAppPriorityDatatable = new System.Data.DataTable();
+            tempCompareAppPriorityDatatable.Columns.Add("RowEntryDifference");
+            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+            {
+                tempCompareAppPriorityDatatable.Columns.Add(item.ColumnName);
+            }
+            tempCompareAppPriorityDatatable.TableName = "SMSG App priority Filter";
+            foreach (System.Data.DataRow newData in ds.Tables["SMSGDB-Filtered"].Rows)
+            {
+                foreach (System.Data.DataRow oldData in oldds.Tables["SMSG MSIT Apps_OLD"].Rows)
+                {
+                    string oldRedId = GetColumnValue<string>(oldData, "RecID");
+                    decimal newRedId = GetColumnValue<decimal>(newData, "RecID");
+                    string oldGrpId = GetColumnValue<string>(oldData, "GrpAppID");
+                    string newGrpId = GetColumnValue<string>(newData, "GrpAppID");
+                    int redyOldId = Convert.ToInt32(oldRedId);
+                    int redyNewId = Convert.ToInt32(newRedId);
+
+                    if ((newGrpId == oldGrpId) && (redyNewId == redyOldId) && !string.IsNullOrEmpty(newGrpId))
+                    {
+                        string oldAppPriority = GetColumnValue<string>(oldData, "Pri");
+                        decimal newAppPriority = GetColumnValue<decimal>(newData, "Pri");
+                        int newPriority = Convert.ToInt32(newAppPriority);
+                        int oldPriority = Convert.ToInt32(oldAppPriority);
+                        if (newPriority != oldPriority)
+                        {
+                            //Add the new entry
+                            DataRow appPriorityFlt = tempCompareAppPriorityDatatable.NewRow();
+                            appPriorityFlt["RowEntryDifference"] = "New";
+                            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+                            {
+                                appPriorityFlt[item.ColumnName] = newData[item.ColumnName].ToString();
+                            }
+                            tempCompareAppPriorityDatatable.Rows.Add(appPriorityFlt);
+                            //Add the old entry
+                            appPriorityFlt = tempCompareAppPriorityDatatable.NewRow();
+                            appPriorityFlt["RowEntryDifference"] = "Old";
+                            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+                            {
+                                appPriorityFlt[item.ColumnName] = oldData[item.ColumnName].ToString();
+                            }
+                            tempCompareAppPriorityDatatable.Rows.Add(appPriorityFlt);
+                            break;
+                        }
+                    }
+                }
+            }
+            ds.Tables.Add(tempCompareAppPriorityDatatable);
+            //End Priority Field Compareing
+
+            /*
+             * This cron is used to identified the changed Grade field, compare to old
+             * excle SMGS report and Live DB. i.e if comparison with last day report 
+             * is needed we automatically compare with Live DB. Those change are shown in Diffrent 
+             * Tab 'SMSG App Grade Filter' and at the last of the same tab we added new 
+             * columns which one is new and which one is old 'RowEntryDifference'  
+             */
+            //Start Grade Field Comparing
+            System.Data.DataTable tempCompareAppGradeDatatable = new System.Data.DataTable();
+            tempCompareAppGradeDatatable.Columns.Add("RowEntryDifference");
+            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+            {
+                tempCompareAppGradeDatatable.Columns.Add(item.ColumnName);
+            }
+            tempCompareAppGradeDatatable.TableName = "SMSG App Grade Filter";
+            foreach (System.Data.DataRow newData in ds.Tables["SMSGDB-Filtered"].Rows)
+            {
+                foreach (System.Data.DataRow oldData in oldds.Tables["SMSG MSIT Apps_OLD"].Rows)
+                {
+                    string oldRedId = GetColumnValue<string>(oldData, "RecID");
+                    decimal newRedId = GetColumnValue<decimal>(newData, "RecID");
+                    string oldGrpId = GetColumnValue<string>(oldData, "GrpAppID");
+                    string newGrpId = GetColumnValue<string>(newData, "GrpAppID");
+                    int redyOldId = Convert.ToInt32(oldRedId);
+                    int redyNewId = Convert.ToInt32(newRedId);
+
+                    if ((newGrpId == oldGrpId) && (redyNewId == redyOldId) && !string.IsNullOrEmpty(newGrpId))
+                    {
+                        string oldAppGrade = GetColumnValue<string>(oldData, "Grade");
+                        string newAppGrade = GetColumnValue<string>(newData, "Grade");
+                        if (newAppGrade != oldAppGrade)
+                        {
+                            //Add the new entry
+                            DataRow appGradeFlt = tempCompareAppGradeDatatable.NewRow();
+                            appGradeFlt["RowEntryDifference"] = "New";
+                            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+                            {
+                                appGradeFlt[item.ColumnName] = newData[item.ColumnName].ToString();
+                            }
+                            tempCompareAppGradeDatatable.Rows.Add(appGradeFlt);
+                            //Add the old entry
+                            appGradeFlt = tempCompareAppGradeDatatable.NewRow();
+                            appGradeFlt["RowEntryDifference"] = "Old";
+                            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+                            {
+                                appGradeFlt[item.ColumnName] = oldData[item.ColumnName].ToString();
+                            }
+                            tempCompareAppGradeDatatable.Rows.Add(appGradeFlt);
+                            break;
+                        }
+                    }
+                }
+            }
+            ds.Tables.Add(tempCompareAppGradeDatatable);
+            //End Grade Field Comparing
+
+            /*
+             * This cron is used to identified the changed TrackStarted	, TrackAssess, 
+             * TrackPlan, TrackBuild, TrackValidated and UsabilityStudy field, compare to old
+             * excle SMGS report and Live DB. i.e if comparison with last day report 
+             * is needed we automatically compare with Live DB. Those change are shown in Diffrent 
+             * Tab 'SMSG App Tracking Filter' and at the last of the same tab we added new 
+             * columns which one is new and which one is old 'RowEntryDifference'  
+             */
+            //Start TrackStarted, TrackAssess, TrackPlan, TrackBuild, TrackValidated and UsabilityStudy field comparing
+            System.Data.DataTable tempCompareAppTrackingDatatable = new System.Data.DataTable();
+            tempCompareAppTrackingDatatable.Columns.Add("RowEntryDifference");
+            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+            {
+                tempCompareAppTrackingDatatable.Columns.Add(item.ColumnName);
+            }
+            tempCompareAppTrackingDatatable.TableName = "SMSG App Tracking Filter";
+            foreach (System.Data.DataRow newData in ds.Tables["SMSGDB-Filtered"].Rows)
+            {
+                foreach (System.Data.DataRow oldData in oldds.Tables["SMSG MSIT Apps_OLD"].Rows)
+                {
+                    string oldRedId = GetColumnValue<string>(oldData, "RecID");
+                    decimal newRedId = GetColumnValue<decimal>(newData, "RecID");
+                    string oldGrpId = GetColumnValue<string>(oldData, "GrpAppID");
+                    string newGrpId = GetColumnValue<string>(newData, "GrpAppID");
+                    int redyOldId = Convert.ToInt32(oldRedId);
+                    int redyNewId = Convert.ToInt32(newRedId);
+                    if ((newGrpId == oldGrpId) && (redyNewId == redyOldId) && !string.IsNullOrEmpty(newGrpId))
+                    {
+                        //Old Data
+                        Boolean oldTrackStartedFiledVal = GetColumnValue<Boolean>(oldData, "TrackStarted");
+                        Boolean oldTrackAssessFieldVal = GetColumnValue<Boolean>(oldData, "TrackAssess");
+                        Boolean oldTrackPlanFieldVal = GetColumnValue<Boolean>(oldData, "TrackPlan");
+                        Boolean oldTrackBuildFieldVal = GetColumnValue<Boolean>(oldData, "TrackBuild");
+                        Boolean oldTrackValidatedFieldVal = GetColumnValue<Boolean>(oldData, "TrackBuild");
+                        Boolean oldUsabilityStudyFieldVal = GetColumnValue<Boolean>(oldData, "UsabilityStudy");
+                        //New Data
+                        Boolean newTrackStartedFiledVal = GetColumnValue<Boolean>(newData, "TrackStarted");
+                        Boolean newTrackAssessFieldVal = GetColumnValue<Boolean>(newData, "TrackAssess");
+                        Boolean newTrackPlanFieldVal = GetColumnValue<Boolean>(newData, "TrackPlan");
+                        Boolean newTrackBuildFieldVal = GetColumnValue<Boolean>(newData, "TrackBuild");
+                        Boolean newTrackValidatedFieldVal = GetColumnValue<Boolean>(newData, "TrackBuild");
+                        Boolean newUsabilityStudyFieldVal = GetColumnValue<Boolean>(newData, "UsabilityStudy");
+
+                        if ((newTrackStartedFiledVal != oldTrackStartedFiledVal) ||
+                            (newTrackAssessFieldVal != oldTrackAssessFieldVal) ||
+                            (newTrackPlanFieldVal != oldTrackPlanFieldVal) ||
+                            (newTrackBuildFieldVal != oldTrackBuildFieldVal) ||
+                            (newTrackValidatedFieldVal != oldTrackValidatedFieldVal) ||
+                            (newUsabilityStudyFieldVal != oldUsabilityStudyFieldVal))
+                        {
+                            //Add the new entry
+                            DataRow appTrackingFlt = tempCompareAppTrackingDatatable.NewRow();
+                            appTrackingFlt["RowEntryDifference"] = "New";
+                            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+                            {
+                                appTrackingFlt[item.ColumnName] = newData[item.ColumnName].ToString();
+                            }
+                            tempCompareAppTrackingDatatable.Rows.Add(appTrackingFlt);
+                            //Add Old Data
+                            appTrackingFlt = tempCompareAppTrackingDatatable.NewRow();
+                            appTrackingFlt["RowEntryDifference"] = "Old";
+                            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+                            {
+                                appTrackingFlt[item.ColumnName] = oldData[item.ColumnName].ToString();
+                            }
+                            tempCompareAppTrackingDatatable.Rows.Add(appTrackingFlt);
+                            break;
+                        }
+                    }
+                }
+            }
+            ds.Tables.Add(tempCompareAppTrackingDatatable);
+            //End TrackStarted, TrackAssess, TrackPlan, TrackBuild, TrackValidated and UsabilityStudy field comparing
+
+            /*
+             * This cron is used to identified the changed Goal1, Goal2 field [CY16 and CY17 goals], compare to old
+             * excle SMGS report and Live DB. i.e if comparison with last day report 
+             * is needed we automatically compare with Live DB. Those change are shown in Diffrent 
+             * Tab 'SMSG App Goal1 and Goal2 Filter' and at the last of the same tab we added new 
+             * columns which one is new and which one is old 'RowEntryDifference'  
+             */
+            //Start CY16 and CY17 goals Field Comparing
+            System.Data.DataTable tempCompareAppGoalDatatable = new System.Data.DataTable();
+            tempCompareAppGoalDatatable.Columns.Add("RowEntryDifference");
+            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+            {
+                tempCompareAppGoalDatatable.Columns.Add(item.ColumnName);
+            }
+            tempCompareAppGoalDatatable.TableName = "SMSG App Goal1 and Goal2 Filter";
+            foreach (System.Data.DataRow newData in ds.Tables["SMSGDB-Filtered"].Rows)
+            {
+                foreach (System.Data.DataRow oldData in oldds.Tables["SMSG MSIT Apps_OLD"].Rows)
+                {
+                    string oldRedId = GetColumnValue<string>(oldData, "RecID");
+                    decimal newRedId = GetColumnValue<decimal>(newData, "RecID");
+                    string oldGrpId = GetColumnValue<string>(oldData, "GrpAppID");
+                    string newGrpId = GetColumnValue<string>(newData, "GrpAppID");
+                    int redyOldId = Convert.ToInt32(oldRedId);
+                    int redyNewId = Convert.ToInt32(newRedId);
+                    if ((newGrpId == oldGrpId) && (redyNewId == redyOldId) && !string.IsNullOrEmpty(newGrpId))
+                    {
+                        string oldGoal1FieldVal = GetColumValIfNull<string>(oldData, "Goal1");
+                        string oldGoal2FieldVal = GetColumValIfNull<string>(oldData, "Goal2");
+                        string newGoal1FieldVal = GetColumValIfNull<string>(newData, "Goal1");
+                        string newGoal2FieldVal = GetColumValIfNull<string>(newData, "Goal2");
+                        if ((newGoal1FieldVal != oldGoal1FieldVal) || (newGoal2FieldVal != oldGoal2FieldVal) ||
+                            (newGoal1FieldVal != null && oldGoal1FieldVal == null) || (newGoal2FieldVal != null && oldGoal2FieldVal == null))
+                        {
+                            //Add the new entry
+                            DataRow appGoalFlt = tempCompareAppGoalDatatable.NewRow();
+                            appGoalFlt["RowEntryDifference"] = "New";
+                            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+                            {
+                                appGoalFlt[item.ColumnName] = newData[item.ColumnName].ToString();
+                            }
+                            tempCompareAppGoalDatatable.Rows.Add(appGoalFlt);
+                            //Add the old entry
+                            appGoalFlt = tempCompareAppGoalDatatable.NewRow();
+                            appGoalFlt["RowEntryDifference"] = "Old";
+                            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+                            {
+                                appGoalFlt[item.ColumnName] = oldData[item.ColumnName].ToString();
+                            }
+                            tempCompareAppGoalDatatable.Rows.Add(appGoalFlt);
+                            break;
+                        }
+                    }
+                }
+            }
+            ds.Tables.Add(tempCompareAppGoalDatatable);
+            //End CY16 and CY17 goals Field Comparing
+
+            //Duplicate entries in SMSG
+            System.Data.DataTable tempdt = new System.Data.DataTable();
+            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+            {
+                tempdt.Columns.Add(item.ColumnName);
+            }
+            tempdt.TableName = "SMSG MSIT Apps-DuplicateEntries";
+            List<string> listTemp = new List<string>();
+            List<string> listDup = new List<string>();
+            //int i,j = 0;
+            foreach (System.Data.DataRow d in ds.Tables["SMSGDB-Filtered"].Rows)
+            {
+                if (!listTemp.Contains(d["GrpAppID"].ToString()))
+                {
+                    listTemp.Add(d["GrpAppID"].ToString());
+                    // j++;
+                }
+                else
+                {
+                    if (!String.IsNullOrEmpty(d["GrpAppID"].ToString()))
+                    {
+                        listDup.Add(d["GrpAppID"].ToString());
+                        //i++;
+                    }
+                }
+            }
+            if (listDup.Count > 0)
+            {
+                foreach (System.Data.DataRow d in ds.Tables["SMSGDB-Filtered"].Rows)
+                {
+                    if (listDup.Contains(d["GrpAppID"].ToString()))
+                    {
+                        DataRow dr = tempdt.NewRow();
+                        foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+                        {
+                            dr[item.ColumnName] = d[item.ColumnName].ToString();
+                        }
+                        tempdt.Rows.Add(dr);
+                    }
+                }
+                ds.Tables.Add(tempdt);
+            }
+            else
+            {
+                System.Data.DataTable TableC = new System.Data.DataTable();
+                TableC.TableName = "SMSG MSIT Apps-DuplicateEntries";
+                TableC.Columns.Add("No entries found.");
+                ds.Tables.Add(TableC);
+            }
+
+            //Duplicate entries in MyApps
+            tempdt = new System.Data.DataTable();
+            foreach (DataColumn item in ds.Tables["MyApps-Filtered"].Columns)
+            {
+                tempdt.Columns.Add(item.ColumnName);
+            }
+            tempdt.TableName = "MyAppsFiltered-Duplicate";
+            listTemp = new List<string>();
+            listDup = new List<string>();
+            //int i,j = 0;
+            foreach (System.Data.DataRow d in ds.Tables["MyApps-Filtered"].Rows)
+            {
+                if (!listTemp.Contains(d["ApplicationID"].ToString()))
+                {
+                    listTemp.Add(d["ApplicationID"].ToString());
+                    // j++;
+                }
+                else
+                {
+                    listDup.Add(d["ApplicationID"].ToString());
+                }
+            }
+            if (listDup.Count > 0)
+            {
+                foreach (System.Data.DataRow d in ds.Tables["MyApps-Filtered"].Rows)
+                {
+                    if (listDup.Contains(d["ApplicationID"].ToString()))
+                    {
+                        DataRow dr = tempdt.NewRow();
+                        foreach (DataColumn item in ds.Tables["MyApps-Filtered"].Columns)
+                        {
+                            dr[item.ColumnName] = d[item.ColumnName].ToString();
+                        }
+                        tempdt.Rows.Add(dr);
+                    }
+                }
+                ds.Tables.Add(tempdt);
+            }
+            else
+            {
+                System.Data.DataTable TableC = new System.Data.DataTable();
+                TableC.TableName = "MyAppsFiltered-Duplicate";
+                TableC.Columns.Add("No entries found.");
+                ds.Tables.Add(TableC);
+            }
+            //WrongAppID-SMSG
+            Regex regex1 = new Regex(@"326-[\d]*-0");//326-3265-0
+            Regex regex2 = new Regex(@"APP-[\d]*-0");//APP-321-0
+            Match match;
+            System.Data.DataTable dtWrongAppIDSMSG = new System.Data.DataTable();
+            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+            {
+                dtWrongAppIDSMSG.Columns.Add(item.ColumnName);
+            }
+            dtWrongAppIDSMSG.TableName = "SMSG MSIT Apps-WrongAppID";
+            foreach (System.Data.DataRow d in ds.Tables["SMSGDB-Filtered"].Rows)
+            {
+                if (!String.IsNullOrEmpty(d["GrpAppID"].ToString()))
+                {
+                    if (d["GrpAppID"].ToString().ToLower().StartsWith("App"))
+                    {
+                        if (regex2.Match(d["GrpAppID"].ToString()).Success)
+                        {
+                            DataRow dr = dtWrongAppIDSMSG.NewRow();
+                            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+                            {
+                                dr[item.ColumnName] = d[item.ColumnName].ToString();
+                            }
+                            dtWrongAppIDSMSG.Rows.Add(dr);
+                        }
+                    }
+                    else
+                    {
+                        if (!regex1.Match(d["GrpAppID"].ToString()).Success)
+                        {
+                            DataRow dr = dtWrongAppIDSMSG.NewRow();
+                            foreach (DataColumn item in ds.Tables["SMSGDB-Filtered"].Columns)
+                            {
+                                dr[item.ColumnName] = d[item.ColumnName].ToString();
+                            }
+                            dtWrongAppIDSMSG.Rows.Add(dr);
+                        }
+                    }
+                }
+            }
+            ds.Tables.Add(dtWrongAppIDSMSG);
+        }
+
+        #region Get Column value
+        /// <summary>
+        /// @Author - Chidvilash
+        /// This method is used to get the Column level data
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="row"></param>
+        /// <param name="columnName"></param>
+        /// <returns></returns>
+        public static T GetColumnValue<T>(DataRow row, string columnName)
+        {
+            T value = default(T);
+            if (row.Table.Columns.Contains(columnName) || row[columnName] != null || !String.IsNullOrWhiteSpace(row[columnName].ToString()))
+            {
+                value = (T)Convert.ChangeType(row[columnName].ToString(), typeof(T));
+            }
+            return value;
+        }
+        #endregion
+
+        #region Get Column Value with contains Null also
+        /// <summary>
+        /// @Author - Chidvilash
+        /// </summary>
+        /// <typeparam name="TableColVal"></typeparam>
+        /// <param name="row"></param>
+        /// <param name="columnName"></param>
+        /// <returns></returns>
+        public static TableColVal GetColumValIfNull<TableColVal>(DataRow row, string columnName)
+        {
+            TableColVal value = default(TableColVal);
+            if (row.Table.Columns.Contains(columnName) || string.IsNullOrWhiteSpace(row[columnName].ToString()))
+            {
+                value = (TableColVal)Convert.ChangeType(row[columnName].ToString(), typeof(TableColVal));
+            }
+            return value;
+        }
+        #endregion
+
+        private static System.Data.DataSet ExportExceltoDT(string filePath)
+        {
+            DataSet ds = new DataSet();
+            System.Data.DataTable dtexcel = new System.Data.DataTable();
+            bool hasHeaders = false;
+            string HDR = hasHeaders ? "Yes" : "No";
+            string strConn;
+            if (filePath.Substring(filePath.LastIndexOf('.')).ToLower() == ".xlsx")
+                strConn = "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" + filePath + ";Extended Properties=\"Excel 12.0;HDR=" + HDR + ";IMEX=0\"";
+            else
+                strConn = "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=" + filePath + ";Extended Properties=\"Excel 8.0;HDR=" + HDR + ";IMEX=0\"";
+            OleDbConnection oledbConn = new OleDbConnection(strConn);
+            try
+            {
+                // Open connection
+                oledbConn.Open();
+                // Create OleDbCommand object and select data from worksheet Sheet1
+                //OleDbCommand cmd = new OleDbCommand();// = new OleDbCommand("SELECT * FROM [MyApps-NotFoundinSMSG$]", oledbConn);
+                // Create new OleDbDataAdapter
+                // oleda.SelectCommand = cmd;
+                // Create a DataSet which will hold the data extracted from the worksheet.
+                // Fill the DataSet from the data extracted from the worksheet.
+                //oleda.Fill(ds, "MyApps-NotFoundinSMSG_OLD");
+                //cmd = new OleDbCommand("SELECT * FROM [SMSG-NotFoundinMyApps$]", oledbConn);
+                //oleda = new OleDbDataAdapter();
+                OleDbDataAdapter oleda = new OleDbDataAdapter();
+                OleDbCommand cmd = new OleDbCommand("SELECT * FROM [SMSG MSIT Apps$]", oledbConn);
+                //oleda.SelectCommand = cmd;
+                //oleda.Fill(ds, "SMSG-NotFoundinMyApps_OLD");
+                //oleda = new OleDbDataAdapter();
+                oleda.SelectCommand = cmd;
+                oleda.Fill(ds, "SMSG MSIT Apps_OLD");
+                //cmd = new OleDbCommand("SELECT * FROM [SMSG Raw Data All$]", oledbConn);
+                //oleda = new OleDbDataAdapter();
+                //oleda.SelectCommand = cmd;
+                //oleda.Fill(ds, "SMSG Raw Data All_OLD");
+                cmd = new OleDbCommand("SELECT * FROM [MyApps Filtered$]", oledbConn);
+                oleda = new OleDbDataAdapter();
+                oleda.SelectCommand = cmd;
+                oleda.Fill(ds, "MyApps Filtered_OLD");
+                cmd = new OleDbCommand("SELECT * FROM [Summary$]", oledbConn);
+                oleda = new OleDbDataAdapter();
+                oleda.SelectCommand = cmd;
+                oleda.Fill(ds, "Summary_OLD");
+                //cmd = new OleDbCommand("SELECT * FROM [MyApps Raw Data All$]", oledbConn);
+                //oleda = new OleDbDataAdapter();
+                //oleda.SelectCommand = cmd;
+                //oleda.Fill(ds, "MyApps Raw Data All_OLD");
+                // Bind the data to the GridView
+                //GridView1.DataSource = ds.Tables[0].DefaultView;
+                //GridView1.DataBind();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+            finally
+            {
+                // Close connection
+                oledbConn.Close();
+            }
+            return ds;
+        }
+
+        private static System.Data.DataTable GetSummarySMSG(DataSet ds)
+        {
+            DataRow dr;
+            System.Data.DataTable dt = new System.Data.DataTable();
+            dt.Columns.Add("Total");
+            dt.Columns.Add("SMSG Scorecard Inventory");
+            dt.Columns.Add("Notes");
+            double total = 0, count = 0, rowCount3 = 0, rowCount4 = 0, rowCount5 = 0, rowCount9 = 0;
+
+            //Row1
+            dr = dt.NewRow();
+            System.Data.DataTable tempdt = ds.Tables["SMSGDB-Filtered"].AsEnumerable().Where(r => (r.Field<string>("MyApps Name") != "Not Found")).CopyToDataTable();
+            List<string> listTemp = new List<string>();
+            foreach (DataRow d in tempdt.Rows)
+            {
+                if (!listTemp.Contains(d["GrpAppID"].ToString()))
+                {
+                    listTemp.Add(d["GrpAppID"].ToString());
+                }
+            }
+            dr["Total"] = tempdt.Rows.Count - listTemp.Count;
+            dr["SMSG Scorecard Inventory"] = "Prioritized, Duplicate";
+            dr["Notes"] = "";
+            dt.Rows.Add(dr);
+            //Row2
+            dr = dt.NewRow();
+            total = tempdt.Rows.Count;
+            dr["Total"] = listTemp.Count;
+            dr["SMSG Scorecard Inventory"] = "Prioritized";
+            dr["Notes"] = "";
+            dt.Rows.Add(dr);
+            //Row3
+            dr = dt.NewRow();
+            //System.Data.DataTable dt3 = ds.Tables["SMSGDB-Filtered"].AsEnumerable().Where(r => ((r.Field<string>("Type") == null) && (r.Field<string>("GrpAppID").Contains("326-") || r.Field<string>("GrpAppID").Contains("-0")))).CopyToDataTable();
+            foreach (DataRow item in ds.Tables["SMSGDB-Filtered"].Rows)
+            {
+                if (String.IsNullOrEmpty(item["Type"].ToString()) && item["MyApps Name"].ToString() == "Not Found" && (item["GrpAppID"].ToString().Contains("326-") || item["GrpAppID"].ToString().Contains("-0")))
+                {
+                    rowCount3 = rowCount3 + 1;
+                }
+                else if (!(String.IsNullOrEmpty(item["Type"].ToString())) && item["MyApps Name"].ToString() == "Not Found" && (item["GrpAppID"].ToString().Contains("326-") || item["GrpAppID"].ToString().Contains("-0")))
+                {
+                    rowCount4 = rowCount4 + 1;
+                }
+                else if (item["GrpAppID"].ToString().Trim().StartsWith("App") || item["GrpAppID"].ToString().Trim() == "APP-13790-0" || item["GrpAppID"].ToString().Trim().StartsWith("APP") || item["GrpAppID"].ToString().ToLower().StartsWith("icto") || item["GrpAppID"].ToString().Length == 4)
+                {
+                    rowCount5 = rowCount5 + 1;
+                }
+                else if (item["GrpAppID"].ToString().Length == 4)
+                {
+                    rowCount9 = rowCount9 + 1;
+                }
+            }
+            //Count adjustment for Row5:
+            rowCount5 = rowCount5 + 1;
+            total = total + count;
+            dr["Total"] = rowCount3;
+            dr["SMSG Scorecard Inventory"] = "";
+            dr["Notes"] = "The non-active apps(rejected, retired, plan, and sustain)";
+            dt.Rows.Add(dr);
+            //Row4
+            dr = dt.NewRow();
+            // count = ds.Tables["SMSGDB-Filtered"].AsEnumerable().Where(r => ((r.Field<string>("Type") != null) && (r.Field<string>("GrpAppID").Contains("326-") || r.Field<string>("GrpAppID").Contains("-0")))).Count();
+            dr["Total"] = rowCount4;
+            dr["SMSG Scorecard Inventory"] = "";
+            dr["Notes"] = "The active apps that doesn’t have UI Or non-Microsoft IT Or Nokia-ICM removed Or ECO or Ent Commerce IT that are prioritized.  ";
+            dt.Rows.Add(dr);
+            //Row5
+            dr = dt.NewRow();
+            dr["Total"] = rowCount5;
+            dr["SMSG Scorecard Inventory"] = "Not matching app ID";
+            dr["Notes"] = "Either the app id starts with APP- Or there is -0 missing a the end of the app ID Or the app ID starts with ICTO However, they are found in MyApps when trying out with App-, ICTO, and 0 added.";
+            dt.Rows.Add(dr);
+            //Row6
+            dr = dt.NewRow();
+            count = ds.Tables["SMSGDB-Filtered"].AsEnumerable().Where(r => (r.Field<string>("GrpAppID") == null && r.Field<string>("ICTO") != null)).Count();
+            xCount = count + rowCount3 + rowCount4 + rowCount5;
+            total = total + count;
+            dr["Total"] = count;
+            dr["SMSG Scorecard Inventory"] = "Blank";
+            dr["Notes"] = "There are " + count + "app ids with blank Grp App ID but with an ICTO that are found in MyApps.";
+            dt.Rows.Add(dr);
+            //Row7
+            dr = dt.NewRow();
+            count = ds.Tables["SMSGDB-Filtered"].AsEnumerable().Where(r => (r.Field<string>("GrpAppID") == null && r.Field<string>("ICTO") == null)).Count();
+            total = total + count;
+            dr["Total"] = count;
+            dr["SMSG Scorecard Inventory"] = "Blank";
+            dr["Notes"] = "There are " + count + "app ids with blank Grp App ID that don't have an ICTO.";
+            dt.Rows.Add(dr);
+            //Row8
+            dr = dt.NewRow();
+            count = ds.Tables["SMSGDB-Filtered"].AsEnumerable().Where(r => (r.Field<string>("GrpAppID") == "0")).Count();
+            total = total + count;
+            dr["Total"] = count;
+            dr["SMSG Scorecard Inventory"] = "0";
+            dr["Notes"] = "All the app IDs with  0 don't have an ICTO ";
+            dt.Rows.Add(dr);
+            //Row9
+            dr = dt.NewRow();
+            dr["Total"] = rowCount9;
+            dr["SMSG Scorecard Inventory"] = "Invalid ID";
+            dr["Notes"] = "App IDs that are not found in MyApps.";
+            dt.Rows.Add(dr);
+            //Row10
+            dr = dt.NewRow();
+            dr["Total"] = ds.Tables["SMSGDB-Filtered"].Rows.Count;
+            dr["SMSG Scorecard Inventory"] = "Total MSIT apps";
+            dr["Notes"] = "";
+            dt.Rows.Add(dr);
+            dt.TableName = "Summary-SMSGBreakup";
+            return dt;
+        }
+
+
+        public static void SendMail(DataSet ds)
+        {
+            StringBuilder builder = new StringBuilder();
+            //Open tags and write the top portion.
+            builder.Append("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 3.2//EN\">");
+            builder.Append("<html xmlns='http://www.w3.org/1999/xhtml'>");
+            builder.Append("<head>");
+            builder.Append("<title>");
+            builder.Append(ConfigurationManager.AppSettings["ReportTitle"].ToString());
+            builder.Append("</title>");
+            builder.Append("<style type=\"text/css\"> table.MsoNormalTable{font-size:10.0pt;font-family:\"Times New Roman\",serif;}p.MsoNormal{margin-bottom:.0001pt;font-size:12.0pt;font-family:\"Times New Roman\",serif;margin-left: 0in;margin-right: 0in;margin-top: 0in;}h1{margin-right:0in;margin-left:0in;font-size:24.0pt;font-family:\"Times New Roman\",serif;font-weight:bold;}a:link{color:#0563C1;text-decoration:underline;text-underline:single;}p{margin-right:0in;margin-left:0in;font-size:12.0pt;font-family:\"Times New Roman\",serif;}</style>");
+            builder.Append("</head>");
+            builder.Append("<h1><u><span style=\"font-size:15.0pt;mso-fareast-font-family:&quot;Times New Roman&quot;\">Scorecard Comparison Report </span></u><span style=\"mso-fareast-font-family:&quot;Times New Roman&quot;\"><u5:p></u5:p><o:p></o:p></span></h1>");
+            builder.Append("<h1 style=\"margin:0in;margin-bottom:.0001pt\"><span style=\"font-size:11.0pt;mso-fareast-font-family:&quot;Times New Roman&quot;\">Date</span><span style=\"font-size:11.0pt;mso-fareast-font-family:&quot;Times New Roman&quot;;font-weight:normal\">:" + System.DateTime.Now.ToShortDateString() + " " + System.DateTime.Now.ToShortTimeString() + "<u5:p></u5:p></span><span style=\"mso-fareast-font-family:&quot;Times New Roman&quot;\"><o:p></o:p></span></h1>");
+            builder.Append("<h1 style=\"margin:0in;margin-bottom:.0001pt\"><span style=\"font-size:11.0pt;mso-fareast-font-family:&quot;Times New Roman&quot;\">Report link</span><span style=\"font-size:11.0pt;mso-fareast-font-family:&quot;Times New Roman&quot;;font-weight:normal\">: </span><span style=\"mso-fareast-font-family:&quot;Times New Roman&quot;\"><span style=\"font-size:11.0pt;font-weight:normal\">" + shareFilepath1 + " ; " + shareFilepath2 + "</span><o:p></o:p></span></h1>");
+            builder.Append("<u5:p></u5:p>");
+
+            builder.Append("<body>");
+            ////Execution Summary
+            //builder.Append("<p><b><u><span style=\"font-size:15.0pt\">Execution Summary:<u5:p></u5:p></span></u></b><o:p></o:p></p>");
+            builder.Append("<h1 style=\"margin:0in;margin-bottom:.0001pt\"><span style=\"font-size:11.0pt;mso-fareast-font-family:&quot;Times New Roman&quot;\">MyApps Summary:</span></h1>");
+            builder.Append("<table border=\"1\" cellpadding=\"0\" cellspacing=\"0\" class=\"MsoNormalTable\">");
+            builder.Append("<tr>");
+            builder.Append("<td>");
+            builder.Append("Notes");
+            builder.Append("</td>");
+            builder.Append("<td>");
+            builder.Append("State");
+            builder.Append("</td>");
+            builder.Append("<td>");
+            builder.Append("Prioritized(NP/P)");
+            builder.Append("</td>");
+            builder.Append("<td>");
+            builder.Append("Total");
+            builder.Append("</td>");
+            builder.Append("</tr>");
+            for (int i = 0; i < ds.Tables["Summary-MyAppsBreakUp"].Rows.Count; i++)
+            {
+                builder.Append("<tr>");
+                for (int j = 0; j < ds.Tables["Summary-MyAppsBreakUp"].Columns.Count; j++)
+                {
+                    builder.Append("<td>");
+                    builder.Append(ds.Tables["Summary-MyAppsBreakUp"].Rows[i][j].ToString());
+                    builder.Append("</td>");
+                }
+                builder.Append("</tr>");
+            }
+            builder.Append("</table>");
+            builder.Append("<u5:p></u5:p>");
+            builder.Append("<h1 style=\"margin:0in;margin-bottom:.0001pt\"><span style=\"font-size:11.0pt;mso-fareast-font-family:&quot;Times New Roman&quot;\">SMSG Summary:</span></h1>");
+            builder.Append("<table border=\"1\" cellpadding=\"0\" cellspacing=\"0\" class=\"MsoNormalTable\">");
+            builder.Append("<tr>");
+            builder.Append("<td>");
+            builder.Append("Total");
+            builder.Append("</td>");
+            builder.Append("<td>");
+            builder.Append("SMSG Scorecard Inventory");
+            builder.Append("</td>");
+            builder.Append("<td>");
+            builder.Append("Notes");
+            builder.Append("</td>");
+            builder.Append("</tr>");
+            for (int i = 0; i < ds.Tables["Summary-SMSGBreakup"].Rows.Count; i++)
+            {
+                builder.Append("<tr>");
+                for (int j = 0; j < ds.Tables["Summary-SMSGBreakup"].Columns.Count; j++)
+                {
+                    builder.Append("<td>");
+                    builder.Append(ds.Tables["Summary-SMSGBreakup"].Rows[i][j].ToString());
+                    builder.Append("</td>");
+                }
+                builder.Append("</tr>");
+            }
+            builder.Append("</table>");
+            builder.Append("<body>");
+
+            //builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            //builder.Append("User Language Code");
+            //builder.Append("</td>");
+            //builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            //builder.Append("URL");
+            //builder.Append("</td>");
+            //builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            //builder.Append("Expected Result");
+            //builder.Append("</td>");
+            //builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            //builder.Append("Actual Result");
+            //builder.Append("</td>");
+            //builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            //builder.Append("Market Detection Result");
+            //builder.Append("</td>");
+            //builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            //builder.Append("Expected Experience");
+            //builder.Append("</td>");
+            //builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            //builder.Append("Response");
+            //builder.Append("</td>");
+            ////builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            ////builder.Append("Market Type");
+            ////builder.Append("</td>");
+            //foreach (string str in ConfigurationManager.AppSettings["FullExpMarkets_Features"].Split('|'))
+            //{
+            //    for (int i = 0; i < 2; i++)
+            //    {
+            //        builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            //        if (i == 0)
+            //        {
+            //            builder.Append(str + "_Expected");
+            //        }
+            //        else
+            //        {
+            //            builder.Append(str + "_Actual");
+            //        }
+            //        builder.Append("</td>");
+            //    }
+            //}
+            ////builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            ////builder.Append("TopSite (Count)");
+            ////builder.Append("</td>");
+            ////builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            ////builder.Append("Infopane (Count)");
+            ////builder.Append("</td>");
+            ////builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            ////builder.Append("FeaturedApps (Count)");
+            ////builder.Append("</td>");
+            ////builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            ////builder.Append("WeatherTile");
+            ////builder.Append("</td>");
+            ////builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            ////builder.Append("SportsTile");
+            ////builder.Append("</td>");
+            ////builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            ////builder.Append("SportsLeague");
+            ////builder.Append("</td>");
+            //builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            //builder.Append("Content Result");
+            //builder.Append("</td>");
+
+            //builder.Append("</tr>");
+            ////builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #9CC2E5; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            //System.Data.DataTable dt1 = ds.Tables["ActualResults"];
+            //int catCount12 = dt1.Rows.Count;
+            ////Get markets with Slideshow greater than 6
+            //for (int x = 0; x < catCount12; x++)
+            //{
+
+            //    //td except 1st and last column
+            //    for (int y = 0; y < dt1.Columns.Count; y++)
+            //    {
+            //        if (y == 0)
+            //        {
+            //            builder.Append("<tr style=\"mso-yfti-irow:1\"><td style=\"border: solid windowtext 1.0pt; background: #BDD6EE; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            //            builder.Append(dt1.Rows[x]["User Language Code"].ToString());
+            //            builder.Append("<u5:p></u5:p></span><o:p></o:p></p></td>");
+            //        }
+            //        if (y == 1)
+            //        {
+            //            {
+            //                builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #BDD6EE; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><b><span style=\"font-size:9.0pt\">");
+            //                builder.Append(dt1.Rows[x]["Locale"].ToString());
+            //                builder.Append("<u5:p></u5:p></span><o:p></o:p></p></td>");
+            //            }
+            //        }
+            //        else if (y > 1 && y < dt1.Columns.Count - 1)
+            //        {
+            //            builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #FFFFFF; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><span style=\"font-size:9.0pt\">");
+            //            builder.Append(dt1.Rows[x][y].ToString());
+            //            builder.Append("<u5:p></u5:p></span><o:p></o:p></p></td>");
+            //        }
+            //        else if (y == dt1.Columns.Count - 1)
+            //        {
+            //            if (dt1.Rows[x][dt1.Columns.Count - 1].ToString() == "Fail")
+            //            {
+            //                builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #FF4500; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><span style=\"font-size:9.0pt\">");
+            //                builder.Append("Fail");
+            //                builder.Append("<u5:p></u5:p></span><o:p></o:p></p></td>");
+            //            }
+            //            if (dt1.Rows[x][dt1.Columns.Count - 1].ToString() == "Pass")
+            //            {
+            //                builder.Append("<td style=\"border: solid windowtext 1.0pt; background: #8FBC8F; padding: 3.75pt 3.75pt 3.75pt 3.75pt\" valign=\"top\"><p class=\"MsoNormal\"><span style=\"font-size:9.0pt\">");
+            //                builder.Append("Pass");
+            //                builder.Append("<u5:p></u5:p></span><o:p></o:p></p></td>");
+            //            }
+            //        }
+            //    }
+            //    builder.Append("</tr>");
+            //}
+            //builder.Append("</table>");
+
+            string HtmlFile = builder.ToString();
+            Microsoft.Office.Interop.Outlook.Application oApp = new Microsoft.Office.Interop.Outlook.Application();
+            Microsoft.Office.Interop.Outlook.MailItem oMsg = (Microsoft.Office.Interop.Outlook.MailItem)oApp.CreateItem(Microsoft.Office.Interop.Outlook.OlItemType.olMailItem);
+            oMsg.To = ConfigurationManager.AppSettings["SendMailTo"];
+            oMsg.Subject = ConfigurationManager.AppSettings["ReportTitle"].ToString() + " : " + System.DateTime.Now.ToShortDateString() + " " + System.DateTime.Now.ToShortTimeString();
+            oMsg.HTMLBody = HtmlFile;
+            oMsg.CC = ConfigurationManager.AppSettings["SendMailCC"];
+            oMsg.Attachments.Add(shareFilepath1);
+            oMsg.Attachments.Add(shareFilepath2);
+            oMsg.Send();
+        }
+
+        private static System.Data.DataTable GetSummaryMyApps(DataSet ds)
+        {
+            DataRow dr;
+            System.Data.DataTable dt = new System.Data.DataTable();
+            dt.Columns.Add("Notes");
+            dt.Columns.Add("State");
+            dt.Columns.Add("Prioritized(NP/P)");
+            dt.Columns.Add("Total");
+            dr = dt.NewRow();
+            double total = 0, count = 0;
+            //Row1
+            count = ds.Tables["MyApps-Filtered"].AsEnumerable().Where(r => ((r.Field<string>("SMSG Priority") == "Not Found in SMSG" || r.Field<string>("SMSG Priority") == "Not Prioritized in SMSG"))).Count();
+            total = total + count;
+            dr["Notes"] = "There are " + count + " active apps that have UI, are MSIT only(Non-Microsoft IT removed), and have ECO and Ent Commerce IT that are NOT prioritized";
+            dr["State"] = "Active Apps";
+            dr["Prioritized(NP/P)"] = "NP";
+            dr["Total"] = count;
+            dt.Rows.Add(dr);
+            //Row2
+            dr = dt.NewRow();
+            count = ds.Tables["MyApps-Filtered"].AsEnumerable().Where(r => ((r.Field<string>("SMSG Priority") != "Not Found in SMSG" && r.Field<string>("BPUName") == "ECO"))).Count();
+            total = total + count;
+            dr["Notes"] = "There are " + count + " prioritized ECO Apps";
+            dr["State"] = "Active Apps";
+            dr["Prioritized(NP/P)"] = "P";
+            dr["Total"] = count;
+            dt.Rows.Add(dr);
+            //Row3
+            dr = dt.NewRow();
+            count = ds.Tables["MyApps-Filtered"].AsEnumerable().Where(r => ((r.Field<string>("SMSG Priority") != "Not Found in SMSG" && r.Field<string>("BPUName") != "ECO"))).Count();
+            dr["Notes"] = "There are " + count + "active apps that have UI, are MSIT only(Non-Microsoft IT removed), and have ECO and Ent Commerce IT  that are prioritized";
+            total = total + count;
+            dr["State"] = "Active Apps";
+            dr["Prioritized(NP/P)"] = "P";
+            dr["Total"] = count;
+            dt.Rows.Add(dr);
+            //Row4
+            dr = dt.NewRow();
+            total = total + xCount;
+            dr["Notes"] = "The active/non-active apps that doesn’t have UI Or non-Microsoft IT Or Nokia-ICM removed Or ECO or Ent Commerce IT that are prioritized.";
+            dr["State"] = "Active/non-Active Apps";
+            dr["Prioritized(NP/P)"] = "NP and P both";
+            dr["Total"] = xCount;
+            dt.Rows.Add(dr);
+            //Row5
+            dr = dt.NewRow();
+            count = ds.Tables["MyApps-Filtered"].AsEnumerable().Where(r => ((r.Field<string>("SMSG Priority") != "Not Found" && r.Field<string>("BPUName") != "ECO"))).Count();
+            dr["Notes"] = "The active/non-active apps that doesn’t have UI Or non-Microsoft IT Or Nokia-ICM removed Or ECO or Ent Commerce IT that are prioritized.";
+            dr["State"] = "Active/non-Active Apps";
+            dr["Prioritized(NP/P)"] = "NP and P both";
+            dr["Total"] = ds.Tables["MyAppsDB"].Rows.Count - total;
+            dt.Rows.Add(dr);
+            //Row 6
+            dr = dt.NewRow();
+            dr["Notes"] = "Total - entire raw data of vwApplicationDumpRpt in MyApps";
+            dr["State"] = "";
+            dr["Prioritized(NP/P)"] = "";
+            dr["Total"] = ds.Tables["MyAppsDB"].Rows.Count;
+            dt.Rows.Add(dr);
+            dt.TableName = "Summary-MyAppsBreakUp";
+            return dt;
+        }
+
+        private static System.Data.DataTable GetSMSGGroupDetails(DataSet ds)
+        {
+            DataRow dr;
+            System.Data.DataTable BPUPriority = new System.Data.DataTable();
+            double total, rowCount = 0;
+            total = ds.Tables["SMSGDB-Filtered"].AsEnumerable().Where(r => ((r.Field<string>("GrpAppID") == null || r.Field<string>("GrpAppID") == String.Empty || r.Field<string>("GrpAppID") == "0"))).Count();
+            BPUPriority.Columns.Add("Grp App W/O ID");
+            BPUPriority.Columns.Add("Total");
+            BPUPriority.Columns.Add("Percentage");
+            BPUPriority.Columns.Add("Total-Previous");
+            BPUPriority.Columns.Add("Total-Difference");
+
+            List<string> lstBPU = new List<string>();
+            //Get distinct BPUNames from MyApps-Filtered list
+            for (int i = 0; i < ds.Tables["SMSGDB-Filtered"].Rows.Count; i++)
+            {
+                if (!lstBPU.Contains(ds.Tables["SMSGDB-Filtered"].Rows[i]["SubGrp"].ToString()))
+                {
+                    lstBPU.Add(ds.Tables["SMSGDB-Filtered"].Rows[i]["SubGrp"].ToString());
+                }
+            }
+
+            for (int i = 0; i < lstBPU.Count; i++)
+            {
+                dr = BPUPriority.NewRow();
+                dr["Grp App W/O ID"] = lstBPU[i];
+                rowCount = ds.Tables["SMSGDB-Filtered"].AsEnumerable().Where(r => (r.Field<string>("SubGrp") == lstBPU[i] && (r.Field<string>("GrpAppID") == null || r.Field<string>("GrpAppID") == String.Empty || r.Field<string>("GrpAppID") == "0"))).Count();
+                dr["Total"] = rowCount;
+                dr["Percentage"] = Convert.ToString(Math.Round(rowCount * 100 / total, 2)) + " %";
+                for (int f = 0; f < oldds.Tables["Summary_Old"].Rows.Count; f++)
+                {
+                    if (oldds.Tables["Summary_Old"].Rows[f][0].ToString() == "Grp App W/O ID")
+                    {
+                        int x = 0;
+                        for (int j = f + 4; j < oldds.Tables["Summary_Old"].Rows.Count; j++)
+                        {
+                            if ((oldds.Tables["Summary_Old"].Rows[j][0].ToString() == lstBPU[x]) && (lstBPU[x] == lstBPU[i]))
+                            {
+                                dr["Total-Previous"] = oldds.Tables["Summary_Old"].Rows[j][1].ToString();
+                                break;
+                            }
+                            else
+                            {
+                                x++;
+                                if (x == lstBPU.Count)
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+                dr["Total-Difference"] = Convert.ToString(rowCount - Convert.ToDouble(string.IsNullOrEmpty(dr["Total-Previous"].ToString())));
+                //dr["Total-Difference"] = Convert.ToString(rowCount - Convert.ToDouble(dr["Total-Previous"].ToString()));
+                BPUPriority.Rows.Add(dr);
+            }
+            dr = BPUPriority.NewRow();
+            dr["Grp App W/O ID"] = "Total";
+            dr["Total"] = total;
+            dr["Percentage"] = "100 %";
+            BPUPriority.Rows.Add(dr);
+            BPUPriority.TableName = "Summary-SMSGwoPriority";
+            return BPUPriority;
+        }
+
+        private static System.Data.DataTable GetSMSGGroupSummary(DataSet ds)
+        {
+            System.Data.DataTable BPUPriority = new System.Data.DataTable();
+            BPUPriority.Columns.Add("Category");
+            BPUPriority.Columns.Add("Total");
+            BPUPriority.Columns.Add("Percentage");
+            DataRow dr = BPUPriority.NewRow();
+            double total, withPriority, withoutPriority = 0;
+            total = ds.Tables["SMSGDB-Filtered"].Rows.Count;
+            dr["Category"] = "Grp App With ID";
+            withoutPriority = ds.Tables["SMSGDB-Filtered"].AsEnumerable().Where(r => (r.Field<string>("GrpAppID") == null || r.Field<string>("GrpAppID") == String.Empty || r.Field<string>("GrpAppID") == "0")).Count();
+            withPriority = total - withoutPriority;
+            dr["Total"] = withPriority;
+            dr["Percentage"] = Convert.ToString(Math.Round(withPriority * 100 / total, 2)) + " %";
+            BPUPriority.Rows.Add(dr);
+            dr = BPUPriority.NewRow();
+            dr["Category"] = "Grp App W/O ID";
+            dr["Total"] = withoutPriority;
+            dr["Percentage"] = Convert.ToString(Math.Round(withoutPriority * 100 / total, 2)) + " %";
+            BPUPriority.Rows.Add(dr);
+            dr = BPUPriority.NewRow();
+            dr["Category"] = "Total";
+            dr["Total"] = total;
+            dr["Percentage"] = "100 %";
+            BPUPriority.Rows.Add(dr);
+            BPUPriority.TableName = "Summary-SMSGID";
+            return BPUPriority;
+        }
+
+        private static System.Data.DataTable GetBPUWithoutPriority(DataSet ds)
+        {
+            DataRow dr;
+            System.Data.DataTable BPUPriority = new System.Data.DataTable();
+            double total, rowCount = 0;
+            total = ds.Tables["MyApps-Filtered"].AsEnumerable().Where(r => (r.Field<string>("SMSG Priority") == "Not Prioritized in SMSG" || r.Field<string>("SMSG Priority") == "Not Found in SMSG")).Count();
+            BPUPriority.Columns.Add("BPUName W/O a priority");
+            BPUPriority.Columns.Add("Total");
+            BPUPriority.Columns.Add("Percentage");
+            BPUPriority.Columns.Add("Total-Previous");
+            BPUPriority.Columns.Add("Total-Difference");
+            List<string> lstBPU = new List<string>();
+            //Get distinct BPUNames from MyApps-Filtered list
+            for (int i = 0; i < ds.Tables["MyApps-Filtered"].Rows.Count; i++)
+            {
+                if (!lstBPU.Contains(ds.Tables["MyApps-Filtered"].Rows[i]["BPUName"].ToString()))
+                {
+                    lstBPU.Add(ds.Tables["MyApps-Filtered"].Rows[i]["BPUName"].ToString());
+                }
+            }
+            for (int i = 0; i < lstBPU.Count; i++)
+            {
+                dr = BPUPriority.NewRow();
+                dr["BPUName W/O a priority"] = lstBPU[i];
+                rowCount = ds.Tables["MyApps-Filtered"].AsEnumerable().Where(r => (r.Field<string>("BPUName") == lstBPU[i] && (r.Field<string>("SMSG Priority") == "Not Prioritized in SMSG" || r.Field<string>("SMSG Priority") == "Not Found in SMSG"))).Count();
+                dr["Total"] = rowCount;
+                dr["Percentage"] = Convert.ToString(Math.Round(rowCount * 100 / total, 2)) + " %";
+                for (int f = 0; f < oldds.Tables["Summary_Old"].Rows.Count; f++)
+                {
+                    if (oldds.Tables["Summary_Old"].Rows[f][0].ToString() == "BPUName W/O a priority")
+                    {
+                        int x = 0;
+                        for (int j = f + 4; j < oldds.Tables["Summary_Old"].Rows.Count; j++)
+                        {
+                            if ((oldds.Tables["Summary_Old"].Rows[j][0].ToString() == lstBPU[x]) && (lstBPU[x] == lstBPU[i]))
+                            {
+                                dr["Total-Previous"] = oldds.Tables["Summary_Old"].Rows[j][1].ToString();
+                                break;
+                            }
+                            else
+                            {
+                                x++;
+                                if (x == lstBPU.Count)
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+                double totPrevious = 0;
+                if (!String.IsNullOrEmpty(dr["Total-Previous"].ToString()))
+                {
+                    totPrevious = Convert.ToDouble(dr["Total-Previous"].ToString());
+                }
+                dr["Total-Difference"] = Convert.ToString(rowCount - totPrevious);
+                BPUPriority.Rows.Add(dr);
+            }
+            dr = BPUPriority.NewRow();
+            dr["BPUName W/O a priority"] = "Total";
+            dr["Total"] = total;
+            dr["Percentage"] = "100 %";
+            BPUPriority.Rows.Add(dr);
+            BPUPriority.TableName = "Summary-BPUwoPriority";
+            return BPUPriority;
+        }
+
+
+        private static System.Data.DataTable GetBPUSummary(DataSet ds)
+        {
+            System.Data.DataTable BPUPriority = new System.Data.DataTable();
+            BPUPriority.Columns.Add("Category");
+            BPUPriority.Columns.Add("Total");
+            BPUPriority.Columns.Add("Percentage");
+            DataRow dr = BPUPriority.NewRow();
+            double total, withPriority, withoutPriority = 0;
+            total = ds.Tables["MyApps-Filtered"].Rows.Count;
+            dr["Category"] = "BPUName With a priority";
+            withoutPriority = ds.Tables["MyApps-Filtered"].AsEnumerable().Where(r => (r.Field<string>("SMSG Priority") == "Not Prioritized in SMSG" || r.Field<string>("SMSG Priority") == "Not Found in SMSG")).Count();
+            withPriority = total - withoutPriority;
+            dr["Total"] = withPriority;
+            dr["Percentage"] = Convert.ToString(Math.Round(withPriority * 100 / total, 2)) + " %";
+            BPUPriority.Rows.Add(dr);
+            dr = BPUPriority.NewRow();
+            dr["Category"] = "BPUName W/O a priority";
+            dr["Total"] = withoutPriority;
+            dr["Percentage"] = Convert.ToString(Math.Round(withoutPriority * 100 / total, 2)) + " %";
+            BPUPriority.Rows.Add(dr);
+            dr = BPUPriority.NewRow();
+            dr["Category"] = "Total";
+            dr["Total"] = total;
+            dr["Percentage"] = "100 %";
+            BPUPriority.Rows.Add(dr);
+            BPUPriority.TableName = "Summary-BPUPriority";
+            return BPUPriority;
+        }
+
+        private static void CompareDB(ref System.Data.DataTable myApps, ref System.Data.DataTable SMSG, System.Data.DataTable myAppsRAW, System.Data.DataTable SMSGRAW)
+        {
+            string applicationID, grpAppID;
+            int start, end;
+            //myApps not in SMSG
+            foreach (DataRow dr in myApps.Rows)
+            {
+                bool foundinSMSG = false;
+                dr["SMSG Priority"] = "Not Found";
+                dr["SMSG Grade"] = "Not Found";
+                dr["SMSG URL"] = "Not Found";
+                applicationID = dr["ApplicationID"].ToString().Trim();
+                if (applicationID.Contains('-'))
+                {
+                    start = applicationID.IndexOf('-') + 1;
+                    end = applicationID.LastIndexOf('-');
+                    if (start - 1 != end)
+                    {
+                        applicationID = applicationID.Substring(start, end - start);
+                    }
+                    else if (start - 1 == end)
+                    {
+                        end = applicationID.Length - 1;
+                        applicationID = applicationID.Substring(start, end - start);
+                    }
+                }
+                foreach (DataRow drs in SMSGRAW.Rows)
+                {
+
+                    grpAppID = drs["GrpAppID"].ToString().Trim();
+                    if (grpAppID.Contains('-'))
+                    {
+                        start = grpAppID.IndexOf('-') + 1;
+                        end = grpAppID.LastIndexOf('-');
+                        if (start - 1 != end)
+                        {
+                            grpAppID = grpAppID.Substring(start, end - start);
+                        }
+                        else if (start - 1 == end)
+                        {
+                            end = grpAppID.Length - 1;
+                            grpAppID = grpAppID.Substring(start, end - start);
+                        }
+
+                    }
+                    if (applicationID == grpAppID)
+                    {
+                        if (Convert.ToInt32(drs["Pri"]) == 1 || Convert.ToInt32(drs["Pri"]) == 2 || Convert.ToInt32(drs["Pri"]) == 3)
+                        {
+                            dr["SMSG Priority"] = drs["Pri"];
+                        }
+                        else
+                        {
+                            dr["SMSG Priority"] = "Not Prioritized in SMSG";
+                        }
+                        dr["SMSG Grade"] = drs["Grade"];
+                        dr["SMSG URL"] = drs["URL"];
+                        foundinSMSG = true;
+                        break;
+                    }
+                }
+                if (foundinSMSG == false)
+                {
+                    dr["SMSG Priority"] = "Not Found in SMSG";
+                }
+            }
+            //SMSG not in myApps
+            foreach (DataRow dr in SMSG.Rows)
+            {
+                dr["MyApps Name"] = "Not Found";
+                dr["MyApps BPUName"] = "Not Found";
+                dr["MyApps ApplicationOwner"] = "Not Found";
+                dr["MyApps AppStatus"] = "Not Found";
+                dr["MyApps URL"] = "Not Found";
+                dr["MyApps ServiceOffering"] = "Not Found";
+                dr["MyApps ServiceLine"] = "Not Found";
+                dr["MyApps SourceSystem"] = "Not Found";
+                dr["MyApps MSAccessibilityStandards"] = "Not Found";
+                dr["MyApps Service"] = "Not Found";
+                grpAppID = dr["GrpAppID"].ToString().Trim();
+                if (grpAppID.Contains('-'))
+                {
+                    start = grpAppID.IndexOf('-') + 1;
+                    end = grpAppID.LastIndexOf('-');
+                    if (start - 1 != end)
+                    {
+                        grpAppID = grpAppID.Substring(start, end - start);
+                    }
+                    else if (start - 1 == end)
+                    {
+                        end = grpAppID.Length - 1;
+                        grpAppID = grpAppID.Substring(start, end - start);
+                    }
+                }
+                foreach (DataRow drs in myAppsRAW.Rows)
+                {
+                    applicationID = drs["ApplicationID"].ToString().Trim();
+                    if (applicationID.Contains('-'))
+                    {
+                        start = applicationID.IndexOf('-') + 1;
+                        end = applicationID.LastIndexOf('-');
+                        if (start - 1 != end)
+                        {
+                            applicationID = applicationID.Substring(start, end - start);
+                        }
+                        else if (start - 1 == end)
+                        {
+                            end = applicationID.Length - 1;
+                            applicationID = applicationID.Substring(start, end - start);
+                        }
+                    }
+                    if (applicationID == grpAppID)
+                    {
+                        dr["MyApps Name"] = drs["Name"];
+                        dr["MyApps BPUName"] = drs["BPUName"];
+                        dr["MyApps ApplicationOwner"] = drs["ApplicationOwner"];
+                        dr["MyApps AppStatus"] = drs["AppStatus"];
+                        dr["MyApps URL"] = drs["URL"];
+                        dr["MyApps ServiceOffering"] = drs["ServiceOffering"];
+                        dr["MyApps ServiceLine"] = drs["ServiceLine"];
+                        dr["MyApps SourceSystem"] = drs["SourceSystem"];
+                        dr["MyApps MSAccessibilityStandards"] = drs["MSAccessibilityStandards"];
+                        dr["MyApps Service"] = drs["Service"];
+                        break;
+                    }
+                }
+            }
+        }
+
+        private static System.Data.DataTable GetDataFromDB(string dbName)
+        {
+            string dbConn;
+            SqlCommand cmd = new SqlCommand();
+            cmd.CommandType = CommandType.Text;
+            if (dbName == "MyAppsDB")
+            {
+                dbConn = @"Data Source = uqs40dikoz.database.windows.net; user id=myappsrpt; password=Uranium92Nd2015; Initial Catalog = myAppsDB;";
+                cmd.CommandText = "SELECT * FROM [dbo].[vwApplicationDimRpt]";
+                //cmd.CommandText = "SELECT distinct * FROM [dbo].[vwApplicationDimRpt] where AppStatus = 'Active'";
+            }
+            else
+            {
+                dbConn = @"Data Source = mkw5dlsuoh.database.windows.net; user id=db_f79d7c44_109a_4257_9b5b_5eb4b35f8534_ExternalReader; password=%P^R$uH<LK1ct#B; Initial Catalog = db_f79d7c44_109a_4257_9b5b_5eb4b35f8534;";
+                cmd.CommandText = "Select * from Inventory";
+            }
+            SqlConnection sqlConnection1 = new SqlConnection(dbConn);
+            cmd.Connection = sqlConnection1;
+            sqlConnection1.Open();
+            SqlDataAdapter sda = new SqlDataAdapter(cmd);
+            System.Data.DataTable dt = new System.Data.DataTable();
+            sda.Fill(dt);
+            dt.TableName = dbName;
+            sqlConnection1.Close();
+            return dt;
+        }
+
+        //log Report
+        public static void RunScheduler()
+        {
+            string path = Path.GetFullPath(ConfigurationManager.AppSettings["LogFile"]) + "\\" + DateTime.Now.ToString("MM_dd_yyyy_HH_mm") + " _Log.txt";
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    File.Create(path);
+                }
+            }
+            catch (Exception ex)
+            {
+                string errorLogPath = @"E:\SMSG_Scorecard\ScorecardSMSGLogs\MyTest.txt";
+                File.AppendAllText(errorLogPath, Environment.NewLine + ex.Message);
+            }
+        }
+
+        private static void WriteDataTableToExcel(System.Data.DataSet dataSet, System.Data.DataSet dsOld, System.Data.DataSet dsSummary, string saveAsLocation, string nameFile)
+        {
+            int summaryOffset = 0;
+            // Create an Excel application instance
+            Application excelApp = new Microsoft.Office.Interop.Excel.Application();
+            Workbook results = excelApp.Workbooks.Add();
+            // Microsoft.Office.Interop.Excel.Range hlinkRange = null;
+            //if (ConfigurationManager.AppSettings["COMPARISONMODE"] == "YES")
+            //{
+            //    foreach (System.Data.DataTable dt in dsOld.Tables)
+            //    {
+            //        int offset = 0;
+            //        //Add a new worksheet to workbook with the Datatable name
+            //        Worksheet excelWorkSheet = results.Sheets.Add();
+            //        excelWorkSheet.Name = dt.TableName;
+            //        Microsoft.Office.Interop.Excel.Range chartRange1;
+            //        chartRange1 = excelWorkSheet.get_Range("A" + ((1 + offset).ToString()), "AX" + ((1 + offset).ToString()));
+            //        chartRange1.Interior.Color = System.Drawing.ColorTranslator.ToOle(System.Drawing.Color.CornflowerBlue);
+            //        chartRange1.Font.Bold = true;
+            //        for (int i = 1; i <= dt.Columns.Count; i++)
+            //        {
+            //            excelWorkSheet.Cells[1 + offset, i] = dt.Columns[i - 1].ColumnName;
+            //        }
+            //        for (int i = 0; i < dt.Rows.Count; i++)
+            //        {
+            //            for (int j = 0; j < dt.Columns.Count; j++)
+            //            {
+            //                excelWorkSheet.Cells[i + 2 + offset, j + 1] = dt.Rows[i][j].ToString();
+            //            }
+            //        }
+            //        excelWorkSheet.Columns["A:AX"].AutoFit();
+            //    }
+            //}
+            foreach (System.Data.DataTable dt in dataSet.Tables)
+            {
+                int offset = 0;
+                //Add a new worksheet to workbook with the Datatable name
+                Worksheet excelWorkSheet = results.Sheets.Add();
+                //if ()
+                //{
+                if (dt.TableName == "MyAppsDB")
+                {
+                    excelWorkSheet.Name = "MyApps Raw Data All";// (" + dt.Rows.Count.ToString() + ")";
+                }
+                else if (dt.TableName == "MyApps-Filtered")
+                {
+                    excelWorkSheet.Name = "MyApps Filtered";// (" + dt.Rows.Count.ToString() + ")";
+                }
+                else if (dt.TableName == "SMSGDB")
+                {
+                    excelWorkSheet.Name = "SMSG Raw Data All";// (" + dt.Rows.Count.ToString() + ")";
+                }
+                else if (dt.TableName == "SMSG-NotFoundinMyApps")
+                {
+                    excelWorkSheet.Name = "SMSG-Not Found in MyApps";// (" + dt.Rows.Count.ToString() + ")";
+                }
+                else if (dt.TableName == "SMSGDB-Filtered")
+                {
+                    //offset = 4;
+                    //excelWorkSheet.Cells[1, 1] = "Group = MSIT";
+                    excelWorkSheet.Name = "SMSG MSIT Apps";// (" + dt.Rows.Count.ToString() + ")";
+                }
+                else if (dt.TableName == "MyApps-NotFP")
+                {
+                    excelWorkSheet.Name = "MyApps Filtered-NotinSMSG";//(" + dt.Rows.Count.ToString() + ")";
+                }
+                else if (dt.TableName == "MyApps-NotFoundSMSG")
+                {
+                    excelWorkSheet.Name = "MyApps-NotFoundinSMSG";//(" + dt.Rows.Count.ToString() + ")";
+                }
+                else if (dt.TableName == "MyApps-NotPrioritizedSMSG")
+                {
+                    excelWorkSheet.Name = "MyApps-NotPrioritizedinSMSG";//(" + dt.Rows.Count.ToString() + ")";
+                }
+                else if (dt.TableName == "MyApps-NotFoundinSMSG")
+                {
+                    excelWorkSheet.Name = "MyApps-NotFoundinSMSG1";//(" + dt.Rows.Count.ToString() + ")";
+                }
+                else if (dt.TableName == "SMSGMSITApps-Blankand0" || dt.TableName == "Table1")
+                {
+                    excelWorkSheet.Name = "SMSGMSITApps-Blankand0";
+                }
+                else
+                {
+                    excelWorkSheet.Name = dt.TableName;
+                }
+                Microsoft.Office.Interop.Excel.Range chartRange1;
+                chartRange1 = excelWorkSheet.get_Range("A" + ((1 + offset).ToString()), "AX" + ((1 + offset).ToString()));
+                chartRange1.Interior.Color = System.Drawing.ColorTranslator.ToOle(System.Drawing.Color.CornflowerBlue);
+                chartRange1.Font.Bold = true;
+                for (int i = 1; i <= dt.Columns.Count; i++)
+                {
+                    excelWorkSheet.Cells[1 + offset, i] = dt.Columns[i - 1].ColumnName;
+                }
+                for (int i = 0; i < dt.Rows.Count; i++)
+                {
+                    for (int j = 0; j < dt.Columns.Count; j++)
+                    {
+                        excelWorkSheet.Cells[i + 2 + offset, j + 1] = dt.Rows[i][j].ToString();
+                    }
+                }
+                excelWorkSheet.Columns["A:AX"].AutoFit();
+                if (excelWorkSheet.Name.Contains("SMSG"))
+                {
+                    chartRange1 = excelWorkSheet.Columns["A"];
+                    chartRange1.Hidden = false;
+                }
+                if (excelWorkSheet.Name == "SMSG MSIT Apps")
+                {
+                    char character;
+                    for (int i = 69; i <= 89; i++)
+                    {
+                        character = (char)i;
+                        chartRange1 = excelWorkSheet.Columns[character.ToString()];
+                        chartRange1.Hidden = true;
+                    }
+                }
+            }
+
+            if (nameFile == "Report-SMSGMyApps")
+            {
+                Worksheet excelWorkSheetSummary = results.Sheets.Add();
+                excelWorkSheetSummary.Name = "Summary";
+                foreach (System.Data.DataTable dt in dsSummary.Tables)
+                {
+                    for (int i = 1; i <= dt.Columns.Count; i++)
+                    {
+                        string colHeader = (1 + summaryOffset).ToString();
+                        excelWorkSheetSummary.Cells[1 + summaryOffset, i] = dt.Columns[i - 1].ColumnName;
+                        Range rang1 = excelWorkSheetSummary.get_Range("A" + colHeader, "C" + colHeader);
+                        rang1.HorizontalAlignment = Microsoft.Office.Interop.Excel.XlHAlign.xlHAlignCenter;
+                        Microsoft.Office.Interop.Excel.Range chartRangeHeader;
+                        chartRangeHeader = excelWorkSheetSummary.get_Range("A" + colHeader, "C" + colHeader);
+                        chartRangeHeader.Interior.Color = System.Drawing.ColorTranslator.ToOle(System.Drawing.Color.CornflowerBlue);
+                        chartRangeHeader.Font.Bold = true;
+                    }
+                    for (int i = 0; i < dt.Rows.Count; i++)
+                    {
+                        for (int j = 0; j < dt.Columns.Count; j++)
+                        {
+                            excelWorkSheetSummary.Cells[i + 2 + summaryOffset, j + 1] = dt.Rows[i][j].ToString();
+                        }
+                    }
+                    summaryOffset = summaryOffset + dt.Rows.Count + 2;
+                    excelWorkSheetSummary.Columns["A:AX"].AutoFit();
+                }
+            }
+            string fileName = "/" + nameFile + "_" + DateTime.Now.ToString("MMddyyyy_HHmmss") + ".xlsx";
+            if (!Directory.Exists(saveAsLocation))
+            {
+                Directory.CreateDirectory(saveAsLocation);
+            }
+            if (String.IsNullOrEmpty(shareFilepath1))
+            {
+                shareFilepath1 = saveAsLocation + fileName;
+            }
+            else
+            {
+                shareFilepath2 = saveAsLocation + fileName;
+            }
+            results.SaveAs(saveAsLocation + fileName);
+            results.Close();
+            excelApp.Quit();
+            Console.WriteLine("File created");
+        }
+    }
+}
